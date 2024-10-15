@@ -2,16 +2,14 @@ import React, { useState } from 'react';
 import axios from 'axios';
 
 const TextSummarizer = () => {
-  const [inputType, setInputType] = useState('text');
-  const [inputText, setInputText] = useState('');
   const [apiKey, setApiKey] = useState('');
-  const [summary, setSummary] = useState('');
+  const [files, setFiles] = useState([]);
+  const [summaries, setSummaries] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  const [file, setFile] = useState(null);
 
   const handleFileChange = (e) => {
-    setFile(e.target.files[0]);
+    setFiles(Array.from(e.target.files));
   };
 
   const readFileContent = (file) => {
@@ -45,45 +43,47 @@ const TextSummarizer = () => {
     });
   };
 
+  const summarizeText = async (text) => {
+    const response = await axios.post(
+      'https://api.openai.com/v1/chat/completions',
+      {
+        model: 'gpt-4',
+        messages: [
+          { role: 'system', content: 'You are a helpful assistant that summarizes text.' },
+          { role: 'user', content: `Please summarize the following text in about 50 words:\n\n${text}` }
+        ],
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+    return response.data.choices[0].message.content;
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsLoading(true);
     setError('');
-    setSummary('');
-
-    let textToSummarize = inputText;
-
-    if (inputType === 'file' && file) {
-      try {
-        textToSummarize = await readFileContent(file);
-      } catch (err) {
-        setError('Error reading file. Please try again.');
-        setIsLoading(false);
-        return;
-      }
-    }
+    setSummaries([]);
 
     try {
-      const response = await axios.post(
-        'https://api.openai.com/v1/chat/completions',
-        {
-          model: 'gpt-4',
-          messages: [
-            { role: 'system', content: 'You are a helpful assistant that summarizes text.' },
-            { role: 'user', content: `Please summarize the following text:\n\n${textToSummarize}` }
-          ],
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-          },
-        }
-      );
+      const summariesPromises = files.map(async (file) => {
+        const content = await readFileContent(file);
+        const summary = await summarizeText(content);
+        return {
+          fileName: file.name,
+          fileSize: (file.size / 1024).toFixed(2) + ' KB',
+          summary: summary
+        };
+      });
 
-      setSummary(response.data.choices[0].message.content);
+      const results = await Promise.all(summariesPromises);
+      setSummaries(results);
     } catch (err) {
-      setError('An error occurred while summarizing the text. Please check your API key and try again.');
+      setError('An error occurred while processing the files. Please try again.');
       console.error(err);
     } finally {
       setIsLoading(false);
@@ -92,7 +92,7 @@ const TextSummarizer = () => {
 
   return (
     <div className="container mx-auto p-4">
-      <h1 className="text-2xl font-bold mb-4">Text Summarizer</h1>
+      <h1 className="text-2xl font-bold mb-4">Multi-Document Text Summarizer</h1>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label htmlFor="apiKey" className="block mb-1">OpenAI API Key:</label>
@@ -106,54 +106,49 @@ const TextSummarizer = () => {
           />
         </div>
         <div>
-          <label className="block mb-1">Input Type:</label>
-          <select
-            value={inputType}
-            onChange={(e) => setInputType(e.target.value)}
+          <label htmlFor="fileInput" className="block mb-1">Upload text or PDF files:</label>
+          <input
+            type="file"
+            id="fileInput"
+            accept=".txt,.pdf"
+            onChange={handleFileChange}
             className="w-full p-2 border rounded"
-          >
-            <option value="text">Text Input</option>
-            <option value="file">File Upload</option>
-          </select>
+            multiple
+            required
+          />
         </div>
-        {inputType === 'text' ? (
-          <div>
-            <label htmlFor="inputText" className="block mb-1">Enter text to summarize:</label>
-            <textarea
-              id="inputText"
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              className="w-full p-2 border rounded"
-              rows="6"
-              required
-            ></textarea>
-          </div>
-        ) : (
-          <div>
-            <label htmlFor="fileInput" className="block mb-1">Upload a text or PDF file:</label>
-            <input
-              type="file"
-              id="fileInput"
-              accept=".txt,.pdf"
-              onChange={handleFileChange}
-              className="w-full p-2 border rounded"
-              required
-            />
-          </div>
-        )}
         <button
           type="submit"
           className="bg-blue-500 text-white px-4 py-2 rounded"
           disabled={isLoading}
         >
-          {isLoading ? 'Summarizing...' : 'Summarize'}
+          {isLoading ? 'Summarizing...' : 'Summarize Files'}
         </button>
       </form>
       {error && <p className="text-red-500 mt-4">{error}</p>}
-      {summary && (
-        <div className="mt-4">
-          <h2 className="text-xl font-bold mb-2">Summary:</h2>
-          <p>{summary}</p>
+      {summaries.length > 0 && (
+        <div className="mt-8">
+          <h2 className="text-xl font-bold mb-4">Summary Table</h2>
+          <div className="overflow-x-auto">
+            <table className="min-w-full bg-white border border-gray-300">
+              <thead>
+                <tr className="bg-gray-100">
+                  <th className="px-4 py-2 border-b">File Name</th>
+                  <th className="px-4 py-2 border-b">File Size</th>
+                  <th className="px-4 py-2 border-b">Summary</th>
+                </tr>
+              </thead>
+              <tbody>
+                {summaries.map((item, index) => (
+                  <tr key={index} className={index % 2 === 0 ? 'bg-gray-50' : 'bg-white'}>
+                    <td className="px-4 py-2 border-b">{item.fileName}</td>
+                    <td className="px-4 py-2 border-b">{item.fileSize}</td>
+                    <td className="px-4 py-2 border-b">{item.summary}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>
