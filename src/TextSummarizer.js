@@ -2,17 +2,44 @@ import React, { useState } from 'react';
 import axios from 'axios';
 
 const TextSummarizer = () => {
+  const [inputType, setInputType] = useState('text');
   const [inputText, setInputText] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [summary, setSummary] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [file, setFile] = useState(null);
+
+  const handleFileChange = (e) => {
+    setFile(e.target.files[0]);
+  };
+
+  const readFileContent = (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (event) => resolve(event.target.result);
+      reader.onerror = (error) => reject(error);
+      reader.readAsText(file);
+    });
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsLoading(true);
     setError('');
     setSummary('');
+
+    let textToSummarize = inputText;
+
+    if (inputType === 'file' && file) {
+      try {
+        textToSummarize = await readFileContent(file);
+      } catch (err) {
+        setError('Error reading file. Please try again.');
+        setIsLoading(false);
+        return;
+      }
+    }
 
     try {
       const response = await axios.post(
@@ -21,7 +48,7 @@ const TextSummarizer = () => {
           model: 'gpt-4',
           messages: [
             { role: 'system', content: 'You are a helpful assistant that summarizes text.' },
-            { role: 'user', content: `Please summarize the following text:\n\n${inputText}` }
+            { role: 'user', content: `Please summarize the following text:\n\n${textToSummarize}` }
           ],
         },
         {
@@ -57,16 +84,41 @@ const TextSummarizer = () => {
           />
         </div>
         <div>
-          <label htmlFor="inputText" className="block mb-1">Enter text to summarize:</label>
-          <textarea
-            id="inputText"
-            value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
+          <label className="block mb-1">Input Type:</label>
+          <select
+            value={inputType}
+            onChange={(e) => setInputType(e.target.value)}
             className="w-full p-2 border rounded"
-            rows="6"
-            required
-          ></textarea>
+          >
+            <option value="text">Text Input</option>
+            <option value="file">File Upload</option>
+          </select>
         </div>
+        {inputType === 'text' ? (
+          <div>
+            <label htmlFor="inputText" className="block mb-1">Enter text to summarize:</label>
+            <textarea
+              id="inputText"
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              className="w-full p-2 border rounded"
+              rows="6"
+              required
+            ></textarea>
+          </div>
+        ) : (
+          <div>
+            <label htmlFor="fileInput" className="block mb-1">Upload a text file (.txt):</label>
+            <input
+              type="file"
+              id="fileInput"
+              accept=".txt"
+              onChange={handleFileChange}
+              className="w-full p-2 border rounded"
+              required
+            />
+          </div>
+        )}
         <button
           type="submit"
           className="bg-blue-500 text-white px-4 py-2 rounded"
