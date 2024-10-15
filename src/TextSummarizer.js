@@ -7,17 +7,17 @@ const InstantDataCreator = () => {
   const [apiKey, setApiKey] = useState('');
   const [files, setFiles] = useState([]);
   const [summary, setSummary] = useState('');
-  const [questions, setQuestions] = useState(['']);
+  const [questions, setQuestions] = useState([{ text: '', type: 'text', choices: [] }]);
   const [answers, setAnswers] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [darkMode, setDarkMode] = useState(false);
-  
+
   useEffect(() => {
     if (darkMode) {
-    document.documentElement.classList.add('dark');
+      document.documentElement.classList.add('dark');
     } else {
-    document.documentElement.classList.remove('dark');
+      document.documentElement.classList.remove('dark');
     }
   }, [darkMode]);
 
@@ -25,18 +25,36 @@ const InstantDataCreator = () => {
     setFiles(Array.from(e.target.files));
   };
 
-  const handleQuestionChange = (index, value) => {
+  const handleQuestionChange = (index, field, value) => {
     const newQuestions = [...questions];
-    newQuestions[index] = value;
+    newQuestions[index] = { ...newQuestions[index], [field]: value };
     setQuestions(newQuestions);
   };
 
   const addQuestion = () => {
-    setQuestions([...questions, '']);
+    setQuestions([...questions, { text: '', type: 'text', choices: [] }]);
   };
 
   const removeQuestion = (index) => {
     const newQuestions = questions.filter((_, i) => i !== index);
+    setQuestions(newQuestions);
+  };
+
+  const addChoice = (questionIndex) => {
+    const newQuestions = [...questions];
+    newQuestions[questionIndex].choices.push('');
+    setQuestions(newQuestions);
+  };
+
+  const handleChoiceChange = (questionIndex, choiceIndex, value) => {
+    const newQuestions = [...questions];
+    newQuestions[questionIndex].choices[choiceIndex] = value;
+    setQuestions(newQuestions);
+  };
+
+  const removeChoice = (questionIndex, choiceIndex) => {
+    const newQuestions = [...questions];
+    newQuestions[questionIndex].choices = newQuestions[questionIndex].choices.filter((_, i) => i !== choiceIndex);
     setQuestions(newQuestions);
   };
 
@@ -70,6 +88,93 @@ const InstantDataCreator = () => {
       }
     });
   };
+
+  const generatePrompt = (question) => {
+    let prompt = question.text;
+    switch (question.type) {
+      case 'number':
+        prompt += ' Please respond with a number and an optional unit, separated by a space. For example: "42 meters" or "3.14".';
+        break;
+      case 'boolean':
+        prompt += ' Please respond with only "Yes", "No", or "Don\'t know".';
+        break;
+      case 'choice':
+        prompt += ` Please choose one of the following options: ${question.choices.join(', ')}.`;
+        break;
+      default:
+        prompt += ' Please provide a concise answer.';
+    }
+    return prompt;
+  };
+
+  const parseAnswer = (answer, type) => {
+    switch (type) {
+      case 'number':
+        const [num, unit] = answer.split(' ');
+        return { number: parseFloat(num), unit: unit || '' };
+      case 'boolean':
+        return answer.toLowerCase();
+      case 'choice':
+        return answer;
+      default:
+        return answer;
+    }
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setError('');
+    setSummary('');
+    setAnswers([]);
+
+    try {
+      if (inputType === 'text') {
+        const result = await summarizeText(inputText);
+        setSummary(result);
+      } else {
+        const fileContents = await Promise.all(files.map(readFileContent));
+        const allAnswers = await Promise.all(
+          fileContents.map(async (content, fileIndex) => {
+            const fileAnswers = await Promise.all(
+              questions.map(async (question) => {
+                const prompt = generatePrompt(question);
+                const response = await axios.post(
+                  'https://api.openai.com/v1/chat/completions',
+                  {
+                    model: 'gpt-4',
+                    messages: [
+                      { role: 'system', content: 'You are a helpful assistant that answers questions based on the given text.' },
+                      { role: 'user', content: `Based on the following text, please answer this question: "${prompt}"\n\nText: ${content}` }
+                    ],
+                  },
+                  {
+                    headers: {
+                      'Authorization': `Bearer ${apiKey}`,
+                      'Content-Type': 'application/json',
+                    },
+                  }
+                );
+                return parseAnswer(response.data.choices[0].message.content, question.type);
+              })
+            );
+            return {
+              fileName: files[fileIndex].name,
+              fileSize: (files[fileIndex].size / 1024).toFixed(2) + ' KB',
+              answers: fileAnswers,
+            };
+          })
+        );
+        setAnswers(allAnswers);
+      }
+    } catch (err) {
+      setError('An error occurred while processing. Please try again.');
+      console.error(err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
 
   const summarizeText = async (text) => {
     const response = await axios.post(
@@ -111,53 +216,21 @@ const InstantDataCreator = () => {
     return response.data.choices[0].message.content;
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setIsLoading(true);
-    setError('');
-    setSummary('');
-    setAnswers([]);
-
-    try {
-      if (inputType === 'text') {
-        const result = await summarizeText(inputText);
-        setSummary(result);
-      } else {
-        const fileContents = await Promise.all(files.map(readFileContent));
-        const allAnswers = await Promise.all(
-          fileContents.map(async (content, fileIndex) => {
-            const fileAnswers = await Promise.all(
-              questions.map(async (question) => {
-                return await answerQuestion(content, question);
-              })
-            );
-            return {
-              fileName: files[fileIndex].name,
-              fileSize: (files[fileIndex].size / 1024).toFixed(2) + ' KB',
-              answers: fileAnswers,
-            };
-          })
-        );
-        setAnswers(allAnswers);
-      }
-    } catch (err) {
-      setError('An error occurred while processing. Please try again.');
-      console.error(err);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   const generateCSV = () => {
-    const headers = ['File Name', 'File Size', ...questions.map((q, i) => `Q${i + 1}: ${q}`)];
+    const headers = ['File Name', 'File Size', ...questions.map((q, i) => `Q${i + 1}: ${q.text}`)];
     const rows = answers.map(item => [
       item.fileName,
       item.fileSize,
-      ...item.answers
+      ...item.answers.map(answer => {
+        if (typeof answer === 'object' && answer.number !== undefined) {
+          return `${answer.number} ${answer.unit}`;
+        }
+        return answer;
+      })
     ]);
     const csvContent = [
       headers.join(','),
-      ...rows.map(row => row.map(cell => `"${cell.replace(/"/g, '""')}"`).join(','))
+      ...rows.map(row => row.map(cell => `"${cell.toString().replace(/"/g, '""')}"`).join(','))
     ].join('\n');
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -165,7 +238,7 @@ const InstantDataCreator = () => {
     if (link.download !== undefined) {
       const url = URL.createObjectURL(blob);
       link.setAttribute('href', url);
-      link.setAttribute('download', 'question_answers.csv');
+      link.setAttribute('download', 'instant_data_creator_results.csv');
       link.style.visibility = 'hidden';
       document.body.appendChild(link);
       link.click();
@@ -240,28 +313,71 @@ const InstantDataCreator = () => {
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Questions:</label>
                   {questions.map((question, index) => (
-                    <div key={index} className="flex mb-2">
-                      <input
-                        type="text"
-                        value={question}
-                        onChange={(e) => handleQuestionChange(index, e.target.value)}
-                        className="flex-grow p-3 border border-gray-300 dark:border-gray-600 rounded-md bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white"
-                        placeholder="Enter your question"
-                        required
-                      />
-                      <button
-                        type="button"
-                        onClick={() => removeQuestion(index)}
-                        className="ml-2 px-4 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 transition-colors duration-200"
-                      >
-                        Remove
-                      </button>
+                    <div key={index} className="mb-4 p-4 border border-gray-300 dark:border-gray-600 rounded-md">
+                      <div className="flex mb-2">
+                        <input
+                          type="text"
+                          value={question.text}
+                          onChange={(e) => handleQuestionChange(index, 'text', e.target.value)}
+                          className="flex-grow p-2 border border-gray-300 dark:border-gray-600 rounded-md bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white"
+                          placeholder="Enter your question"
+                          required
+                        />
+                        <select
+                          value={question.type}
+                          onChange={(e) => handleQuestionChange(index, 'type', e.target.value)}
+                          className="ml-2 p-2 border border-gray-300 dark:border-gray-600 rounded-md bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white"
+                        >
+                          <option value="text">Text</option>
+                          <option value="number">Number + Unit</option>
+                          <option value="boolean">Yes/No/Don't know</option>
+                          <option value="choice">Choice List</option>
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => removeQuestion(index)}
+                          className="ml-2 px-4 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 transition-colors duration-200"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                      {question.type === 'choice' && (
+                        <div className="mt-2">
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Choices:</label>
+                          {question.choices.map((choice, choiceIndex) => (
+                            <div key={choiceIndex} className="flex mb-2">
+                              <input
+                                type="text"
+                                value={choice}
+                                onChange={(e) => handleChoiceChange(index, choiceIndex, e.target.value)}
+                                className="flex-grow p-2 border border-gray-300 dark:border-gray-600 rounded-md bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white"
+                                placeholder="Enter a choice"
+                                required
+                              />
+                              <button
+                                type="button"
+                                onClick={() => removeChoice(index, choiceIndex)}
+                                className="ml-2 px-4 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 transition-colors duration-200"
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() => addChoice(index)}
+                            className="mt-2 px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 transition-colors duration-200"
+                          >
+                            Add Choice
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))}
                   <button
                     type="button"
                     onClick={addQuestion}
-                    className="mt-2 px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 transition-colors duration-200"
+                    className="mt-2 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors duration-200"
                   >
                     Add Question
                   </button>
@@ -302,7 +418,7 @@ const InstantDataCreator = () => {
                     <th className="px-4 py-2 border-b dark:border-gray-600">File Name</th>
                     <th className="px-4 py-2 border-b dark:border-gray-600">File Size</th>
                     {questions.map((question, index) => (
-                      <th key={index} className="px-4 py-2 border-b dark:border-gray-600">{`Q${index + 1}: ${question}`}</th>
+                      <th key={index} className="px-4 py-2 border-b dark:border-gray-600">{`Q${index + 1}: ${question.text}`}</th>
                     ))}
                   </tr>
                 </thead>
@@ -312,7 +428,11 @@ const InstantDataCreator = () => {
                       <td className="px-4 py-2 border-b dark:border-gray-700">{item.fileName}</td>
                       <td className="px-4 py-2 border-b dark:border-gray-700">{item.fileSize}</td>
                       {item.answers.map((answer, answerIndex) => (
-                        <td key={answerIndex} className="px-4 py-2 border-b dark:border-gray-700">{answer}</td>
+                        <td key={answerIndex} className="px-4 py-2 border-b dark:border-gray-700">
+                          {questions[answerIndex].type === 'number' 
+                            ? `${answer.number} ${answer.unit}`
+                            : answer}
+                        </td>
                       ))}
                     </tr>
                   ))}
