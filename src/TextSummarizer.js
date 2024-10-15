@@ -16,10 +16,32 @@ const TextSummarizer = () => {
 
   const readFileContent = (file) => {
     return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = (event) => resolve(event.target.result);
-      reader.onerror = (error) => reject(error);
-      reader.readAsText(file);
+      if (file.type === 'application/pdf') {
+        const reader = new FileReader();
+        reader.onload = async (event) => {
+          const typedarray = new Uint8Array(event.target.result);
+          try {
+            const pdf = await window.pdfjsLib.getDocument(typedarray).promise;
+            let fullText = '';
+            for (let i = 1; i <= pdf.numPages; i++) {
+              const page = await pdf.getPage(i);
+              const content = await page.getTextContent();
+              const strings = content.items.map(item => item.str);
+              fullText += strings.join(' ') + '\n';
+            }
+            resolve(fullText);
+          } catch (error) {
+            reject(error);
+          }
+        };
+        reader.onerror = (error) => reject(error);
+        reader.readAsArrayBuffer(file);
+      } else {
+        const reader = new FileReader();
+        reader.onload = (event) => resolve(event.target.result);
+        reader.onerror = (error) => reject(error);
+        reader.readAsText(file);
+      }
     });
   };
 
@@ -108,11 +130,11 @@ const TextSummarizer = () => {
           </div>
         ) : (
           <div>
-            <label htmlFor="fileInput" className="block mb-1">Upload a text file (.txt):</label>
+            <label htmlFor="fileInput" className="block mb-1">Upload a text or PDF file:</label>
             <input
               type="file"
               id="fileInput"
-              accept=".txt"
+              accept=".txt,.pdf"
               onChange={handleFileChange}
               className="w-full p-2 border rounded"
               required
