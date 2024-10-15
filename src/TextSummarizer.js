@@ -7,12 +7,28 @@ const TextSummarizer = () => {
   const [apiKey, setApiKey] = useState('');
   const [files, setFiles] = useState([]);
   const [summary, setSummary] = useState('');
-  const [summaries, setSummaries] = useState([]);
+  const [questions, setQuestions] = useState(['']);
+  const [answers, setAnswers] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
 
   const handleFileChange = (e) => {
     setFiles(Array.from(e.target.files));
+  };
+
+  const handleQuestionChange = (index, value) => {
+    const newQuestions = [...questions];
+    newQuestions[index] = value;
+    setQuestions(newQuestions);
+  };
+
+  const addQuestion = () => {
+    setQuestions([...questions, '']);
+  };
+
+  const removeQuestion = (index) => {
+    const newQuestions = questions.filter((_, i) => i !== index);
+    setQuestions(newQuestions);
   };
 
   const readFileContent = (file) => {
@@ -66,30 +82,54 @@ const TextSummarizer = () => {
     return response.data.choices[0].message.content;
   };
 
+  const answerQuestion = async (text, question) => {
+    const response = await axios.post(
+      'https://api.openai.com/v1/chat/completions',
+      {
+        model: 'gpt-4',
+        messages: [
+          { role: 'system', content: 'You are a helpful assistant that answers questions based on the given text.' },
+          { role: 'user', content: `Based on the following text, please answer this question: "${question}"\n\nText: ${text}` }
+        ],
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+    return response.data.choices[0].message.content;
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsLoading(true);
     setError('');
     setSummary('');
-    setSummaries([]);
+    setAnswers([]);
 
     try {
       if (inputType === 'text') {
         const result = await summarizeText(inputText);
         setSummary(result);
       } else {
-        const summariesPromises = files.map(async (file) => {
-          const content = await readFileContent(file);
-          const summary = await summarizeText(content);
-          return {
-            fileName: file.name,
-            fileSize: (file.size / 1024).toFixed(2) + ' KB',
-            summary: summary
-          };
-        });
-
-        const results = await Promise.all(summariesPromises);
-        setSummaries(results);
+        const fileContents = await Promise.all(files.map(readFileContent));
+        const allAnswers = await Promise.all(
+          fileContents.map(async (content, fileIndex) => {
+            const fileAnswers = await Promise.all(
+              questions.map(async (question) => {
+                return await answerQuestion(content, question);
+              })
+            );
+            return {
+              fileName: files[fileIndex].name,
+              fileSize: (files[fileIndex].size / 1024).toFixed(2) + ' KB',
+              answers: fileAnswers,
+            };
+          })
+        );
+        setAnswers(allAnswers);
       }
     } catch (err) {
       setError('An error occurred while processing. Please try again.');
@@ -101,7 +141,7 @@ const TextSummarizer = () => {
 
   return (
     <div className="container mx-auto p-4">
-      <h1 className="text-2xl font-bold mb-4">Text Summarizer</h1>
+      <h1 className="text-2xl font-bold mb-4">Text Analyzer</h1>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label htmlFor="apiKey" className="block mb-1">OpenAI API Key:</label>
@@ -138,25 +178,56 @@ const TextSummarizer = () => {
             ></textarea>
           </div>
         ) : (
-          <div>
-            <label htmlFor="fileInput" className="block mb-1">Upload text or PDF files:</label>
-            <input
-              type="file"
-              id="fileInput"
-              accept=".txt,.pdf"
-              onChange={handleFileChange}
-              className="w-full p-2 border rounded"
-              multiple
-              required
-            />
-          </div>
+          <>
+            <div>
+              <label htmlFor="fileInput" className="block mb-1">Upload text or PDF files:</label>
+              <input
+                type="file"
+                id="fileInput"
+                accept=".txt,.pdf"
+                onChange={handleFileChange}
+                className="w-full p-2 border rounded"
+                multiple
+                required
+              />
+            </div>
+            <div>
+              <label className="block mb-1">Questions:</label>
+              {questions.map((question, index) => (
+                <div key={index} className="flex mb-2">
+                  <input
+                    type="text"
+                    value={question}
+                    onChange={(e) => handleQuestionChange(index, e.target.value)}
+                    className="flex-grow p-2 border rounded"
+                    placeholder="Enter your question"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeQuestion(index)}
+                    className="ml-2 px-4 py-2 bg-red-500 text-white rounded"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={addQuestion}
+                className="mt-2 px-4 py-2 bg-green-500 text-white rounded"
+              >
+                Add Question
+              </button>
+            </div>
+          </>
         )}
         <button
           type="submit"
           className="bg-blue-500 text-white px-4 py-2 rounded"
           disabled={isLoading}
         >
-          {isLoading ? 'Summarizing...' : 'Summarize'}
+          {isLoading ? 'Processing...' : 'Analyze'}
         </button>
       </form>
       {error && <p className="text-red-500 mt-4">{error}</p>}
@@ -166,24 +237,28 @@ const TextSummarizer = () => {
           <p>{summary}</p>
         </div>
       )}
-      {summaries.length > 0 && (
+      {answers.length > 0 && (
         <div className="mt-8">
-          <h2 className="text-xl font-bold mb-4">Summary Table</h2>
+          <h2 className="text-xl font-bold mb-4">Results Table</h2>
           <div className="overflow-x-auto">
             <table className="min-w-full bg-white border border-gray-300">
               <thead>
                 <tr className="bg-gray-100">
                   <th className="px-4 py-2 border-b">File Name</th>
                   <th className="px-4 py-2 border-b">File Size</th>
-                  <th className="px-4 py-2 border-b">Summary</th>
+                  {questions.map((question, index) => (
+                    <th key={index} className="px-4 py-2 border-b">{`Q${index + 1}: ${question}`}</th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {summaries.map((item, index) => (
+                {answers.map((item, index) => (
                   <tr key={index} className={index % 2 === 0 ? 'bg-gray-50' : 'bg-white'}>
                     <td className="px-4 py-2 border-b">{item.fileName}</td>
                     <td className="px-4 py-2 border-b">{item.fileSize}</td>
-                    <td className="px-4 py-2 border-b">{item.summary}</td>
+                    {item.answers.map((answer, answerIndex) => (
+                      <td key={answerIndex} className="px-4 py-2 border-b">{answer}</td>
+                    ))}
                   </tr>
                 ))}
               </tbody>
