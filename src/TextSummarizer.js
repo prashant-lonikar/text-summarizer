@@ -204,7 +204,7 @@ const InstantDataCreator = () => {
     const response = await axios.post(
       'https://api.openai.com/v1/chat/completions',
       {
-        model: 'gpt-4',
+        model: 'gpt-4o',
         messages: [
           { role: 'system', content: 'You are a helpful assistant that summarizes text.' },
           { role: 'user', content: `Please summarize the following text in about 50 words:\n\n${text}` }
