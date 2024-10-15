@@ -2,8 +2,11 @@ import React, { useState } from 'react';
 import axios from 'axios';
 
 const TextSummarizer = () => {
+  const [inputType, setInputType] = useState('text');
+  const [inputText, setInputText] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [files, setFiles] = useState([]);
+  const [summary, setSummary] = useState('');
   const [summaries, setSummaries] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
@@ -67,23 +70,29 @@ const TextSummarizer = () => {
     e.preventDefault();
     setIsLoading(true);
     setError('');
+    setSummary('');
     setSummaries([]);
 
     try {
-      const summariesPromises = files.map(async (file) => {
-        const content = await readFileContent(file);
-        const summary = await summarizeText(content);
-        return {
-          fileName: file.name,
-          fileSize: (file.size / 1024).toFixed(2) + ' KB',
-          summary: summary
-        };
-      });
+      if (inputType === 'text') {
+        const result = await summarizeText(inputText);
+        setSummary(result);
+      } else {
+        const summariesPromises = files.map(async (file) => {
+          const content = await readFileContent(file);
+          const summary = await summarizeText(content);
+          return {
+            fileName: file.name,
+            fileSize: (file.size / 1024).toFixed(2) + ' KB',
+            summary: summary
+          };
+        });
 
-      const results = await Promise.all(summariesPromises);
-      setSummaries(results);
+        const results = await Promise.all(summariesPromises);
+        setSummaries(results);
+      }
     } catch (err) {
-      setError('An error occurred while processing the files. Please try again.');
+      setError('An error occurred while processing. Please try again.');
       console.error(err);
     } finally {
       setIsLoading(false);
@@ -92,7 +101,7 @@ const TextSummarizer = () => {
 
   return (
     <div className="container mx-auto p-4">
-      <h1 className="text-2xl font-bold mb-4">Multi-Document Text Summarizer</h1>
+      <h1 className="text-2xl font-bold mb-4">Text Summarizer</h1>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label htmlFor="apiKey" className="block mb-1">OpenAI API Key:</label>
@@ -106,26 +115,57 @@ const TextSummarizer = () => {
           />
         </div>
         <div>
-          <label htmlFor="fileInput" className="block mb-1">Upload text or PDF files:</label>
-          <input
-            type="file"
-            id="fileInput"
-            accept=".txt,.pdf"
-            onChange={handleFileChange}
+          <label className="block mb-1">Input Type:</label>
+          <select
+            value={inputType}
+            onChange={(e) => setInputType(e.target.value)}
             className="w-full p-2 border rounded"
-            multiple
-            required
-          />
+          >
+            <option value="text">Text Input</option>
+            <option value="file">File Upload</option>
+          </select>
         </div>
+        {inputType === 'text' ? (
+          <div>
+            <label htmlFor="inputText" className="block mb-1">Enter text to summarize:</label>
+            <textarea
+              id="inputText"
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              className="w-full p-2 border rounded"
+              rows="6"
+              required
+            ></textarea>
+          </div>
+        ) : (
+          <div>
+            <label htmlFor="fileInput" className="block mb-1">Upload text or PDF files:</label>
+            <input
+              type="file"
+              id="fileInput"
+              accept=".txt,.pdf"
+              onChange={handleFileChange}
+              className="w-full p-2 border rounded"
+              multiple
+              required
+            />
+          </div>
+        )}
         <button
           type="submit"
           className="bg-blue-500 text-white px-4 py-2 rounded"
           disabled={isLoading}
         >
-          {isLoading ? 'Summarizing...' : 'Summarize Files'}
+          {isLoading ? 'Summarizing...' : 'Summarize'}
         </button>
       </form>
       {error && <p className="text-red-500 mt-4">{error}</p>}
+      {summary && (
+        <div className="mt-8">
+          <h2 className="text-xl font-bold mb-2">Summary:</h2>
+          <p>{summary}</p>
+        </div>
+      )}
       {summaries.length > 0 && (
         <div className="mt-8">
           <h2 className="text-xl font-bold mb-4">Summary Table</h2>
