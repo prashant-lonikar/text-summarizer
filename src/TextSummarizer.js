@@ -90,34 +90,59 @@ const InstantDataCreator = () => {
   };
 
   const generatePrompt = (question) => {
-    let prompt = question.text;
+    let prompt = `Based on the following text, please answer this question: "${question.text}"`;
+    let outputFormat = '';
+    
     switch (question.type) {
+      case 'text':
+        outputFormat = `
+        {
+          "answer": "Your summary here"
+        }`;
+        break;
       case 'number':
-        prompt += ' Please respond with a number and an optional unit, separated by a space. For example: "42 meters" or "3.14".';
+        outputFormat = `
+        {
+          "number": 0,
+          "unit": "unit"
+        }`;
+        prompt += ' Respond with a number and an optional unit.';
         break;
       case 'boolean':
-        prompt += ' Please respond with only "Yes", "No", or "Don\'t know".';
+        outputFormat = `
+        {
+          "answer": "yes/no/don't know"
+        }`;
+        prompt += ' Respond with only "yes", "no", or "don\'t know".';
         break;
       case 'choice':
-        prompt += ` Please choose one of the following options: ${question.choices.join(', ')}.`;
+        outputFormat = `
+        {
+          "answer": "exact match to one of the provided choices"
+        }`;
+        prompt += ` Choose one of the following options: ${question.choices.join(', ')}.`;
         break;
-      default:
-        prompt += ' Please provide a concise answer.';
     }
+    
+    prompt += ` Provide your answer in the following JSON format:${outputFormat}`;
     return prompt;
   };
 
-  const parseAnswer = (answer, type) => {
-    switch (type) {
-      case 'number':
-        const [num, unit] = answer.split(' ');
-        return { number: parseFloat(num), unit: unit || '' };
-      case 'boolean':
-        return answer.toLowerCase();
-      case 'choice':
-        return answer;
-      default:
-        return answer;
+  const parseAnswer = (jsonString, type) => {
+    try {
+      const parsed = JSON.parse(jsonString);
+      switch (type) {
+        case 'number':
+          return `${parsed.number} ${parsed.unit}`.trim();
+        case 'boolean':
+        case 'choice':
+          return parsed.answer;
+        default:
+          return parsed.answer;
+      }
+    } catch (error) {
+      console.error('Failed to parse JSON answer:', error);
+      return 'Error: Failed to parse answer';
     }
   };
 
@@ -144,8 +169,8 @@ const InstantDataCreator = () => {
                   {
                     model: 'gpt-4',
                     messages: [
-                      { role: 'system', content: 'You are a helpful assistant that answers questions based on the given text.' },
-                      { role: 'user', content: `Based on the following text, please answer this question: "${prompt}"\n\nText: ${content}` }
+                      { role: 'system', content: 'You are a helpful assistant that answers questions based on the given text. Always respond in the requested JSON format.' },
+                      { role: 'user', content: `${prompt}\n\nText: ${content}` }
                     ],
                   },
                   {
@@ -174,7 +199,6 @@ const InstantDataCreator = () => {
       setIsLoading(false);
     }
   };
-
 
   const summarizeText = async (text) => {
     const response = await axios.post(
